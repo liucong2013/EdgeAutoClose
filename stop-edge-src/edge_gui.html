@@ -1,0 +1,246 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edge 自动关闭程序</title>
+    <style>
+        /* General Styles */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; color: #333; overflow: hidden; }
+        .container { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 20px; padding: 30px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1); min-width: 400px; text-align: center; }
+        .title { font-size: 24px; font-weight: bold; margin-bottom: 20px; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .section { margin: 20px 0; padding: 15px; background: rgba(52, 152, 219, 0.1); border-radius: 10px; }
+        .section h3 { margin-bottom: 15px; color: #34495e; }
+        .time-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; }
+        .time-btn { padding: 12px 20px; border: none; border-radius: 8px; background: linear-gradient(45deg, #3498db, #2980b9); color: white; font-size: 14px; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 2px 10px rgba(52, 152, 219, 0.3); }
+        .time-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(52, 152, 219, 0.4); }
+        .time-btn:active { transform: translateY(0); }
+        .custom-time { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        .custom-time input { padding: 8px 12px; border: 2px solid #bdc3c7; border-radius: 6px; font-size: 14px; width: 80px; text-align: center; }
+        .custom-time input:focus { outline: none; border-color: #3498db; }
+        .start-btn { background: linear-gradient(45deg, #27ae60, #2ecc71); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 20px; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3); }
+        .start-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(46, 204, 113, 0.4); }
+        .start-btn:disabled { background: #95a5a6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .status { margin-top: 20px; padding: 15px; background: #ecf0f1; border-radius: 8px; border-left: 4px solid #3498db; }
+        .current-time { font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 10px; }
+        .countdown { font-size: 16px; color: #e74c3c; margin-top: 10px; }
+        .edge-status { margin-top: 10px; font-weight: bold; }
+        .running { color: #27ae60; }
+        .stopped { color: #e74c3c; }
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 10px; margin: 10px 0; color: #856404; font-size: 12px; }
+
+        /* Notification Style */
+        .notification { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background-color: #4CAF50; color: white; padding: 15px 25px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); transition: top 0.5s ease-in-out; z-index: 1000; }
+        .notification.show { top: 20px; }
+        .notification.error { background-color: #f44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">🌐 Edge 自动关闭程序</div>
+        
+        <div class="section">
+            <h3>⏰ 快速设置（小时后关闭）</h3>
+            <div class="time-buttons">
+                <button class="time-btn" onclick="setHours(0.5, event)">30分钟</button>
+                <button class="time-btn" onclick="setHours(1, event)">1小时</button>
+                <button class="time-btn" onclick="setHours(2, event)">2小时</button>
+                <button class="time-btn" onclick="setHours(3, event)">3小时</button>
+                <button class="time-btn" onclick="setHours(4, event)">4小时</button>
+                <button class="time-btn" onclick="setHours(6, event)">6小时</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>🎯 精确时间设置</h3>
+            <div class="custom-time">
+                <label>在</label>
+                <input type="number" id="targetHour" min="0" max="23" placeholder="时">
+                <label>:</label>
+                <input type="number" id="targetMinute" min="0" max="59" placeholder="分">
+                <label>关闭</label>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>⚡ 测试模式</h3>
+            <div class="time-buttons">
+                <button class="time-btn" onclick="setSeconds(10, event)">10秒后</button>
+                <button class="time-btn" onclick="setSeconds(30, event)">30秒后</button>
+                <button class="time-btn" onclick="setSeconds(60, event)">1分钟后</button>
+            </div>
+        </div>
+
+        <button class="start-btn" id="startBtn" onclick="startMonitoring()">🚀 开始监控</button>
+        <button class="start-btn" id="stopBtn" onclick="stopMonitoring()" style="display:none; background: linear-gradient(45deg, #e74c3c, #c0392b);">⏹️ 停止监控</button>
+
+        <div class="status" id="status" style="display: none;">
+            <div class="current-time" id="currentTime"></div>
+            <div>目标关闭时间: <span id="targetTime"></span></div>
+            <div class="countdown" id="countdown"></div>
+            <div class="edge-status" id="edgeStatus">Edge状态: 检测中...</div>
+        </div>
+
+        <div class="warning">
+            ⚠️ 使用说明：<br>
+            此程序现在通过本地服务 (edge-stop-server.js) 运行。<br>
+            1. 运行 `deno run --allow-read --allow-run --allow-net edge-stop-server.js` 启动服务。<br>
+            2. 在浏览器中打开 `http://localhost:19100/` 访问此界面。
+        </div>
+    </div>
+    <div id="notification" class="notification"></div>
+
+    <script>
+        let countdownInterval = null;
+        let statusInterval = null;
+        let targetCloseTime = null;
+
+        function showNotification(message, isError = false) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification show ${isError ? 'error' : ''}`;
+            setTimeout(() => {
+                notification.className = 'notification';
+            }, 3000);
+        }
+
+        function highlightButton(event, color) {
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                btn.style.background = 'linear-gradient(45deg, #3498db, #2980b9)';
+            });
+            if (event) event.target.style.background = color;
+        }
+
+        function setHours(hours, event) {
+            highlightButton(event, 'linear-gradient(45deg, #e74c3c, #c0392b)');
+            const target = new Date(new Date().getTime() + hours * 60 * 60 * 1000);
+            document.getElementById('targetHour').value = target.getHours();
+            document.getElementById('targetMinute').value = target.getMinutes();
+        }
+
+        function setSeconds(seconds, event) {
+            highlightButton(event, 'linear-gradient(45deg, #f39c12, #e67e22)');
+            const target = new Date(new Date().getTime() + seconds * 1000);
+            document.getElementById('targetHour').value = target.getHours();
+            document.getElementById('targetMinute').value = target.getMinutes();
+        }
+
+        async function startMonitoring() {
+            let hour = parseInt(document.getElementById('targetHour').value);
+            let minute = parseInt(document.getElementById('targetMinute').value);
+
+            if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+                showNotification('请输入有效的时间！', true);
+                return;
+            }
+
+            const now = new Date();
+            let initialTargetTime = new Date();
+            initialTargetTime.setHours(hour, minute, 0, 0);
+
+            // If the calculated time is in the past, assume it's for the next day
+            if (initialTargetTime <= now) {
+                initialTargetTime.setDate(initialTargetTime.getDate() + 1);
+            }
+
+            // Add 2 minutes buffer for the countdown display, as the BAT script takes time to close.
+            targetCloseTime = new Date(initialTargetTime.getTime() + 2 * 60 * 1000);
+            showNotification('已增加2分钟缓冲，倒计时将提前2分钟显示，以预留BAT脚本关闭时间。');
+
+            try {
+                const response = await fetch('http://localhost:19100/close-edge', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hour: initialTargetTime.getHours(), minute: initialTargetTime.getMinutes() })
+                });
+                if (!response.ok) throw new Error(await response.text());
+                showNotification('✅ 关闭请求已发送！');
+                enterMonitoringState(targetCloseTime);
+            } catch (error) {
+                showNotification(`❌ 发送关闭请求失败: ${error.message}`, true);
+            }
+        }
+
+        function stopMonitoring() {
+            clearInterval(countdownInterval);
+            clearInterval(statusInterval);
+            countdownInterval = null;
+            statusInterval = null;
+            targetCloseTime = null;
+
+            document.getElementById('status').style.display = 'none';
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').style.display = 'none';
+            highlightButton(null, null);
+            showNotification('监控已在界面上停止。');
+        }
+
+        function enterMonitoringState(targetTime) {
+            targetCloseTime = targetTime;
+            document.getElementById('status').style.display = 'block';
+            document.getElementById('targetTime').textContent = targetTime.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' });
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'inline-block';
+
+            if (countdownInterval) clearInterval(countdownInterval);
+            countdownInterval = setInterval(updateCountdown, 1000);
+            updateCountdown();
+
+            if (statusInterval) clearInterval(statusInterval);
+            statusInterval = setInterval(updateEdgeStatus, 5000);
+            updateEdgeStatus();
+        }
+
+        async function updateCountdown() {
+            if (!targetCloseTime) return;
+            const diff = targetCloseTime - new Date();
+            if (diff <= 0) {
+                document.getElementById('countdown').textContent = '时间到！正在关闭服务器...';
+                clearInterval(countdownInterval);
+                clearInterval(statusInterval);
+                try {
+                    await fetch('http://localhost:19100/shutdown', { method: 'POST' });
+                    showNotification('服务器已关闭。');
+                    document.getElementById('edgeStatus').textContent = '任务完成，服务器已关闭。请手动关闭此页面。';
+                    document.getElementById('edgeStatus').className = 'edge-status stopped';
+                    document.getElementById('stopBtn').disabled = true;
+                } catch (e) {
+                    showNotification('服务器关闭失败，可能已离线。', true);
+                    document.getElementById('edgeStatus').textContent = '服务器无响应，请手动关闭。';
+                }
+                return;
+            }
+            const h = Math.floor(diff / 3600000).toString().padStart(2, '0');
+            const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
+            const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+            document.getElementById('countdown').textContent = `倒计时: ${h}:${m}:${s}`;
+        }
+
+        async function updateEdgeStatus() {
+            try {
+                const response = await fetch('http://localhost:19100/status');
+                const data = await response.json();
+                const statusEl = document.getElementById('edgeStatus');
+                if (data.isRunning) {
+                    statusEl.textContent = 'BAT状态: 正在运行';
+                    statusEl.className = 'edge-status running';
+                } else {
+                    statusEl.textContent = 'BAT状态: 未运行';
+                    statusEl.className = 'edge-status stopped';
+                }
+            } catch (error) {
+                console.error("Could not get status:", error);
+                const statusEl = document.getElementById('edgeStatus');
+                statusEl.textContent = 'BAT状态: 未知 (服务器无响应)';
+                statusEl.className = 'edge-status stopped';
+            }
+        }
+
+        // Initial setup
+        setInterval(() => document.getElementById('currentTime').textContent = `当前时间: ${new Date().toLocaleTimeString('zh-CN')}`, 1000);
+        updateEdgeStatus();
+    </script>
+</body>
+</html>
