@@ -27,14 +27,11 @@
         .current-time { font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 10px; }
         .countdown { font-size: 16px; color: #e74c3c; margin-top: 10px; }
         .edge-status { margin-top: 10px; font-weight: bold; }
+        .ws-status { margin-top: 10px; font-weight: bold; }
+        .info-message { margin-top: 15px; padding: 12px; border-radius: 8px; font-weight: bold; text-align: left; }
         .running { color: #27ae60; }
         .stopped { color: #e74c3c; }
         .warning { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 10px; margin: 10px 0; color: #856404; font-size: 12px; }
-
-        /* Notification Style */
-        .notification { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background-color: #4CAF50; color: white; padding: 15px 25px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); transition: top 0.5s ease-in-out; z-index: 1000; }
-        .notification.show { top: 20px; }
-        .notification.error { background-color: #f44336; }
     </style>
 </head>
 <body>
@@ -75,6 +72,7 @@
 
         <button class="start-btn" id="startBtn" onclick="startMonitoring()">🚀 开始监控</button>
         <button class="start-btn" id="stopBtn" onclick="stopMonitoring()" style="display:none; background: linear-gradient(45deg, #e74c3c, #c0392b);">⏹️ 停止监控</button>
+        <button class="start-btn" id="closeNowBtn" onclick="closeEdgeNow()" style="background: linear-gradient(45deg, #c0392b, #e74c3c); margin-top: 10px;">🚨 立即关闭 Edge</button>
 
         <div class="status" id="status" style="display: none;">
             <div class="current-time" id="currentTime"></div>
@@ -83,6 +81,8 @@
             <div class="edge-status" id="edgeStatus">Edge状态: 检测中...</div>
         </div>
 
+        <div class="info-message" id="infoMessage">正在初始化...</div>
+
         <div class="warning">
             ⚠️ 使用说明：<br>
             此程序现在通过本地服务 (edge-stop-server.js) 运行。<br>
@@ -90,20 +90,34 @@
             2. 在浏览器中打开 `http://localhost:19100/` 访问此界面。
         </div>
     </div>
-    <div id="notification" class="notification"></div>
 
     <script>
         let countdownInterval = null;
         let statusInterval = null;
         let targetCloseTime = null;
+        let socket = null;
+        let config = null; // To store server config
 
-        function showNotification(message, isError = false) {
-            const notification = document.getElementById('notification');
-            notification.textContent = message;
-            notification.className = `notification show ${isError ? 'error' : ''}`;
-            setTimeout(() => {
-                notification.className = 'notification';
-            }, 3000);
+        function updateStatusMessage(message, isError = false) {
+            const infoEl = document.getElementById('infoMessage');
+            infoEl.textContent = message;
+            infoEl.style.color = isError ? '#e74c3c' : '#2c3e50';
+            infoEl.style.background = isError ? 'rgba(231, 76, 60, 0.1)' : 'rgba(52, 152, 219, 0.1)';
+        }
+
+        // Fetch config from server and then initialize
+        async function fetchConfigAndInit() {
+            updateStatusMessage('正在获取服务器配置...');
+            try {
+                const response = await fetch('http://localhost:19100/config');
+                if (!response.ok) throw new Error('Could not fetch config');
+                config = await response.json();
+                updateStatusMessage('✅ 服务器配置已加载，正在连接 WebSocket...');
+                setupWebSocket(); // Now setup WebSocket with the correct URL
+            } catch (error) {
+                console.error('Failed to fetch config:', error);
+                updateStatusMessage('❌ 无法加载服务器配置，请确保服务正在运行。', true);
+            }
         }
 
         function highlightButton(event, color) {
@@ -132,7 +146,7 @@
             let minute = parseInt(document.getElementById('targetMinute').value);
 
             if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-                showNotification('请输入有效的时间！', true);
+                updateStatusMessage('请输入有效的时间！', true);
                 return;
             }
 
@@ -140,14 +154,12 @@
             let initialTargetTime = new Date();
             initialTargetTime.setHours(hour, minute, 0, 0);
 
-            // If the calculated time is in the past, assume it's for the next day
             if (initialTargetTime <= now) {
                 initialTargetTime.setDate(initialTargetTime.getDate() + 1);
             }
 
-            // Add 2 minutes buffer for the countdown display, as the BAT script takes time to close.
             targetCloseTime = new Date(initialTargetTime.getTime() + 2 * 60 * 1000);
-            showNotification('已增加2分钟缓冲，倒计时将提前2分钟显示，以预留BAT脚本关闭时间。');
+            updateStatusMessage('已增加2分钟缓冲以预留关闭时间。');
 
             try {
                 const response = await fetch('http://localhost:19100/close-edge', {
@@ -156,10 +168,10 @@
                     body: JSON.stringify({ hour: initialTargetTime.getHours(), minute: initialTargetTime.getMinutes() })
                 });
                 if (!response.ok) throw new Error(await response.text());
-                showNotification('✅ 关闭请求已发送！');
+                updateStatusMessage('✅ 关闭请求已发送！');
                 enterMonitoringState(targetCloseTime);
             } catch (error) {
-                showNotification(`❌ 发送关闭请求失败: ${error.message}`, true);
+                updateStatusMessage(`❌ 发送关闭请求失败: ${error.message}`, true);
             }
         }
 
@@ -174,7 +186,44 @@
             document.getElementById('startBtn').style.display = 'inline-block';
             document.getElementById('stopBtn').style.display = 'none';
             highlightButton(null, null);
-            showNotification('监控已在界面上停止。');
+            updateStatusMessage('监控已在界面上停止。');
+        }
+
+        let remoteCloseTimer = null;
+
+        function startRemoteCloseCountdown() {
+            if (remoteCloseTimer) clearInterval(remoteCloseTimer);
+
+            let seconds = 5;
+            updateStatusMessage(`收到服务器关闭指令！将在 ${seconds} 秒后关闭 Edge...`, true);
+
+            remoteCloseTimer = setInterval(() => {
+                seconds--;
+                if (seconds > 0) {
+                    updateStatusMessage(`将在 ${seconds} 秒后关闭 Edge...`, true);
+                } else {
+                    clearInterval(remoteCloseTimer);
+                    closeEdgeNow(true);
+                }
+            }, 1000);
+        }
+
+        async function closeEdgeNow(skipConfirmation = false) {
+            const confirmed = skipConfirmation || confirm("您确定要立即关闭所有 Edge 浏览器窗口吗？此操作无法撤销。");
+            if (confirmed) {
+                updateStatusMessage('正在发送立即关闭指令...');
+                try {
+                    const response = await fetch('http://localhost:19100/close-edge-now', { method: 'POST' });
+                    const result = await response.json();
+                    if (response.ok) {
+                        updateStatusMessage(`✅ ${result.message}`);
+                    } else {
+                        throw new Error(result.message);
+                    }
+                } catch (error) {
+                    updateStatusMessage(`❌ 指令发送失败: ${error.message}`, true);
+                }
+            }
         }
 
         function enterMonitoringState(targetTime) {
@@ -238,9 +287,64 @@
             }
         }
 
+        function setupWebSocket() {
+            if (!config || !config.websocketUrl) {
+                console.error('WebSocket URL not found in config.');
+                return;
+            }
+            const wsStatus = document.getElementById('wsStatus');
+            const url = config.websocketUrl; // Use URL from config
+            socket = new WebSocket(url);
+
+            socket.onopen = () => {
+                updateStatusMessage('✅ WebSocket 已成功连接');
+            };
+
+            socket.onmessage = (event) => {
+                console.log('WebSocket message:', event.data);
+
+                if (event.data === 'stop edge') {
+                    startRemoteCloseCountdown();
+                    return;
+                }
+
+                // Handle other messages, assuming they are JSON for status updates
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'status') {
+                        const statusEl = document.getElementById('edgeStatus');
+                        if (msg.isRunning) {
+                            statusEl.textContent = 'BAT状态: 正在运行';
+                            statusEl.className = 'edge-status running';
+                        } else {
+                            statusEl.textContent = 'BAT状态: 未运行';
+                            statusEl.className = 'edge-status stopped';
+                        }
+                    }
+                } catch (e) {
+                    // If it's not a 'stop edge' command and not a valid JSON, just log it.
+                    console.log('Received non-JSON message:', event.data);
+                    updateStatusMessage(`收到未知消息: ${event.data}`);
+                }
+            };
+
+            socket.onclose = () => {
+                updateStatusMessage('🔌 WebSocket 已断开，正在尝试重新连接...', true);
+                setTimeout(setupWebSocket, 5000); // Try to reconnect every 5 seconds
+            };
+
+            socket.onerror = (error) => {
+                updateStatusMessage('❌ WebSocket 连接发生错误', true);
+                console.error('WebSocket error:', error);
+            };
+        }
+
         // Initial setup
-        setInterval(() => document.getElementById('currentTime').textContent = `当前时间: ${new Date().toLocaleTimeString('zh-CN')}`, 1000);
-        updateEdgeStatus();
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchConfigAndInit();
+            setInterval(() => document.getElementById('currentTime').textContent = `当前时间: ${new Date().toLocaleTimeString('zh-CN')}`, 1000);
+            updateEdgeStatus();
+        });
     </script>
 </body>
 </html>

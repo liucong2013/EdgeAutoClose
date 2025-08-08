@@ -164,8 +164,7 @@ echo.
 echo [确认] Edge 将在: !CLOSE_TIME! 关闭
 echo.
 
-:: 启动Edge浏览器
-start "" msedge.exe
+
 
 :LOOP
 cls

@@ -1,8 +1,30 @@
 // server.js
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
+import { config } from "https://deno.land/x/dotenv/mod.ts";
+
+// Load environment variables from .env file
+const env = await config({ path: "./.env", defaultsPath: null });
+const WEBSOCKET_URL = env.WEBSOCKET_URL || "ws://127.0.0.1:8010/ws"; // Fallback to default
 
 async function handler(req) {
   const url = new URL(req.url);
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // --- NEW: Config Endpoint ---
+  if (url.pathname === "/config") {
+      return new Response(JSON.stringify({ websocketUrl: WEBSOCKET_URL }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+  }
 
   // 1. Serve the HTML GUI
   if (url.pathname === "/") {
@@ -42,7 +64,31 @@ async function handler(req) {
     }
   }
 
-  // 3. Check the status of the batch file
+  // 3. Close Edge Immediately
+  if (url.pathname === "/close-edge-now" && req.method === "POST") {
+    console.log("Received request to close Edge immediately...");
+    const command = new Deno.Command("taskkill", {
+      args: ["/F", "/IM", "msedge.exe"],
+    });
+    
+    try {
+      const { code, stdout, stderr } = await command.output();
+      if (code === 0) {
+        console.log("Successfully sent command to close Edge.");
+        return new Response(JSON.stringify({ message: "Close command sent successfully." }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      } else {
+        // taskkill returns code 128 if the process is not found, which is not a server error.
+        const errorMsg = new TextDecoder().decode(stderr);
+        console.log(`Command to close Edge finished with code ${code}: ${errorMsg}`);
+        return new Response(JSON.stringify({ message: "Edge process not found or could not be closed.", details: errorMsg }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    } catch (error) {
+      console.error("Failed to execute 'taskkill' command:", error);
+      return new Response(JSON.stringify({ message: "Failed to execute taskkill command." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+  }
+
+  // 4. Check the status of the batch file
   if (url.pathname === "/status" && req.method === "GET") {
     const psCommand = `if (Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*edge_auto_close.bat*' }) { Write-Output 'true' } else { Write-Output 'false' }`;
     const command = new Deno.Command("powershell.exe", {

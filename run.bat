@@ -12,7 +12,7 @@ if %errorlevel% neq 0 (
 
 REM Start Deno Server
 echo Starting Edge auto-close server...
-start "" /D "stop-edge-src" deno run --allow-read --allow-run --allow-net edge-stop-server.js &
+start "" /D "stop-edge-src" deno run --allow-read --allow-run --allow-net --allow-env edge-stop-server.js &
 timeout /t 2 /nobreak >nul
 start "" msedge.exe http://localhost:19100/
 
